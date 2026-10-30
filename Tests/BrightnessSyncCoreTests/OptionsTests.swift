@@ -22,6 +22,11 @@ struct OptionsTests {
         #expect(try Options(arguments: ["-h"]).showHelp)
     }
 
+    @Test func helpStillValidatesTheRange() {
+        // `make install` relies on this to check MIN/MAX before touching the running agent.
+        #expect(throws: OptionsError.self) { try Options(arguments: ["--help", "--min", "60", "--max", "50"]) }
+    }
+
     @Test(arguments: [
         ["--min"],
         ["--max", "abc"],

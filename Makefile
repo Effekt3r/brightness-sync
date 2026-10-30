@@ -3,8 +3,8 @@ BINARY := $(HOME)/.local/bin/brightness-sync
 PLIST  := $(HOME)/Library/LaunchAgents/$(LABEL).plist
 LOG    := $(HOME)/Library/Logs/brightness-sync.log
 DOMAIN := gui/$(shell id -u)
-MIN    ?= 0
-MAX    ?= 100
+MIN    := 0
+MAX    := 100
 
 .PHONY: build test install uninstall logs
 
@@ -14,11 +14,12 @@ build:
 test:
 	swift test
 
+# The first line validates MIN/MAX before the running agent is touched.
 install: build
+	.build/release/brightness-sync --min $(MIN) --max $(MAX) --help > /dev/null
 	-launchctl bootout $(DOMAIN)/$(LABEL) 2>/dev/null
 	mkdir -p $(dir $(BINARY)) $(dir $(PLIST)) $(dir $(LOG))
 	install -m 755 .build/release/brightness-sync $(BINARY)
-	$(BINARY) --min $(MIN) --max $(MAX) --help > /dev/null
 	sed -e 's|@LABEL@|$(LABEL)|' -e 's|@BINARY@|$(BINARY)|' -e 's|@LOG@|$(LOG)|' \
 		-e 's|@MIN@|$(MIN)|' -e 's|@MAX@|$(MAX)|' launchd/agent.plist.in > $(PLIST)
 	plutil -lint $(PLIST)
@@ -30,4 +31,4 @@ uninstall:
 	rm -f $(PLIST) $(BINARY)
 
 logs:
-	tail -f $(LOG)
+	tail -F $(LOG)
