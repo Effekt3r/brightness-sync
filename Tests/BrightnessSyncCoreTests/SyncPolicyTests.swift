@@ -43,6 +43,15 @@ struct SyncPolicyTests {
         #expect(!policy.shouldWrite(50, at: start + 1))
     }
 
+    @Test func levelHoveringAtARoundingBoundaryIsNotRewritten() {
+        var policy = SyncPolicy()
+        policy.didWrite(50, at: start)
+        #expect(!policy.shouldWrite(50.6, at: start + 1))
+        #expect(!policy.shouldWrite(49.4, at: start + 2))
+        #expect(policy.shouldWrite(50.75, at: start + 3))
+        #expect(policy.shouldWrite(49.25, at: start + 4))
+    }
+
     @Test func clockSteppingBackDoesNotBlockWrites() {
         var policy = SyncPolicy()
         policy.didWrite(50, at: start + 3600)

@@ -76,6 +76,18 @@ struct SyncerTests {
         #expect(monitor.writes == [50, 70])
     }
 
+    @Test func brightnessHoveringAtARoundingBoundaryDoesNotChatter() {
+        let source = FakeSource(0.5)
+        let monitor = FakeMonitor()
+        let syncer = makeSyncer(source, monitor)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)  // writes 50
+        for (index, value) in [0.506, 0.494, 0.506, 0.494].enumerated() {
+            source.value = value
+            syncer.tick(onlineDisplays: bothDisplays, now: start + Double(index + 1))
+        }
+        #expect(monitor.writes == [50])
+    }
+
     @Test func replugReconnectsAndResends() {
         let monitor = FakeMonitor()
         let syncer = makeSyncer(FakeSource(0.5), monitor)

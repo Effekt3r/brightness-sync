@@ -66,9 +66,9 @@ public final class Syncer {
         }
         note("built-in", "built-in display available")
 
-        let target = mapper.map(brightness)
-        guard policy.shouldWrite(target, at: now), connectIfNeeded(now: now) else { return }
+        guard policy.shouldWrite(mapper.level(brightness), at: now), connectIfNeeded(now: now) else { return }
 
+        let target = mapper.map(brightness)
         if monitor.setBrightness(target) {
             policy.didWrite(target, at: now)
             note("write", "writing brightness to the external display")

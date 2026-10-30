@@ -9,8 +9,13 @@ public struct BrightnessMapper: Equatable, Sendable {
         self.maximum = maximum
     }
 
-    public func map(_ brightness: Double) -> Int {
+    /// The monitor value before rounding, within `minimum…maximum`.
+    public func level(_ brightness: Double) -> Double {
         let fraction = brightness.isNaN ? 0 : min(max(brightness, 0), 1)
-        return Int((Double(minimum) + Double(maximum - minimum) * fraction).rounded())
+        return Double(minimum) + Double(maximum - minimum) * fraction
+    }
+
+    public func map(_ brightness: Double) -> Int {
+        Int(level(brightness).rounded())
     }
 }

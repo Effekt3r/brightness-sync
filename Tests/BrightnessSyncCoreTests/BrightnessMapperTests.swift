@@ -24,6 +24,13 @@ struct BrightnessMapperTests {
         #expect(mapper.map(1) == 80)
     }
 
+    @Test func levelIsTheUnroundedValue() {
+        let mapper = BrightnessMapper(minimum: 10, maximum: 90)
+        #expect(mapper.level(0.5) == 50)
+        #expect(mapper.level(0.25) == 30)
+        #expect(mapper.level(2) == 90)
+    }
+
     @Test func clampsOutOfRangeInput() {
         let mapper = BrightnessMapper(minimum: 10, maximum: 90)
         #expect(mapper.map(-0.5) == 10)
