@@ -52,10 +52,11 @@ public final class Syncer {
             monitor.disconnect()
             lastDiscovery = nil
             policy.forceResend()
+            for topic in ["monitor", "monitor-count", "write"] { lastNotes[topic] = nil }  // log the reconnection
         }
 
         guard let brightness = source.brightness() else {
-            note("built-in", "built-in display unavailable (lid closed or asleep); waiting")
+            note("built-in", "built-in display unavailable (lid closed, asleep, or brightness unreadable); waiting")
             sourceAvailable = false
             return
         }

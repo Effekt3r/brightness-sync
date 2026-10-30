@@ -28,7 +28,8 @@ final class FakeMonitor: MonitorLink {
         return acceptsWrites
     }
 
-    func readBrightness() -> DDC.Reply? { DDC.Reply(current: 100, maximum: 100) }
+    var reading: DDC.Reply? = DDC.Reply(current: 100, maximum: 100)
+    func readBrightness() -> DDC.Reply? { reading }
 }
 
 final class LogRecorder {
@@ -96,7 +97,7 @@ struct SyncerTests {
         syncer.tick(onlineDisplays: bothDisplays, now: start)
         source.value = nil
         syncer.tick(onlineDisplays: bothDisplays, now: start + 1)
-        #expect(log.lines.contains("built-in display unavailable (lid closed or asleep); waiting"))
+        #expect(log.lines.contains("built-in display unavailable (lid closed, asleep, or brightness unreadable); waiting"))
         source.value = 0.5
         syncer.tick(onlineDisplays: bothDisplays, now: start + 2)
         #expect(monitor.writes == [50, 50])
@@ -139,6 +140,37 @@ struct SyncerTests {
         syncer.tick(onlineDisplays: builtInOnly, now: start + 3600)  // discovery #1
         syncer.tick(onlineDisplays: builtInOnly, now: start)         // clock stepped back an hour
         #expect(monitor.connectCount == 2)
+    }
+
+    @Test func reconnectionAfterADisplayChangeIsLoggedAgain() {
+        let monitor = FakeMonitor()
+        let log = LogRecorder()
+        let syncer = makeSyncer(FakeSource(0.5), monitor, log)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        syncer.tick(onlineDisplays: [1, 5], now: start + 1)  // monitor replugged under a new display ID
+        #expect(log.lines.contains("display configuration changed"))
+        #expect(log.lines.filter { $0 == "external display connected (brightness 100/100)" }.count == 2)
+        #expect(monitor.writes == [50, 50])
+    }
+
+    @Test func warnsWhenSeveralExternalDisplaysAreFound() {
+        let monitor = FakeMonitor()
+        monitor.displaysFound = 2
+        let log = LogRecorder()
+        let syncer = makeSyncer(FakeSource(0.5), monitor, log)
+        syncer.tick(onlineDisplays: [1, 4, 5], now: start)
+        #expect(log.lines.contains("warning: 2 external displays found; using the first"))
+        #expect(monitor.writes == [50])
+    }
+
+    @Test func logsWhenTheMonitorsBrightnessCannotBeRead() {
+        let monitor = FakeMonitor()
+        monitor.reading = nil
+        let log = LogRecorder()
+        let syncer = makeSyncer(FakeSource(0.5), monitor, log)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        #expect(log.lines.contains("external display connected (brightness read failed)"))
+        #expect(monitor.writes == [50])
     }
 
     @Test func missingMonitorIsRetriedEveryFiveSecondsAndLoggedOnce() {
