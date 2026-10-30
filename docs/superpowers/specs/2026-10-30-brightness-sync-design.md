@@ -1,6 +1,6 @@
 # brightness-sync — design
 
-**Date:** 2026-10-30 · **Status:** design approved, implementation plan next
+**Date:** 2026-10-30 · **Status:** implemented 2026-10-31, updated after code review
 
 ## Goal
 
@@ -56,11 +56,13 @@ A Swift package with a library target `BrightnessSyncCore` and an executable tar
 | Unit | Kind | Responsibility |
 |---|---|---|
 | `DDC` | pure | Encode "set VCP" and "get VCP" packets with checksums; decode and validate replies. |
-| `BrightnessMapper` | pure | Map built-in brightness 0…1 to a monitor value: `round(min + (max − min) × clamp(b, 0, 1))`. Defaults `min = 0`, `max = 100`. |
-| `SyncPolicy` | pure | Given the target, the last value successfully written, the time of that write, the current time and a *force* flag, decide whether to write now. |
-| `BuiltInDisplay` | system | Find the built-in display (`CGDisplayIsBuiltin`); return its brightness 0…1, or `nil` when offline (lid closed) or asleep (`CGDisplayIsAsleep`). |
+| `BrightnessMapper` | pure | Map built-in brightness 0…1 to a monitor value: `level = min + (max − min) × clamp(b, 0, 1)`, written as `round(level)`. Defaults `min = 0`, `max = 100`. |
+| `SyncPolicy` | pure | Given the unrounded level, the last value successfully written, the time of that write, the current time and a *force* flag, decide whether to write now. |
+| `Options` | pure | Parse and validate the command-line flags. |
+| `Syncer` | pure | The data flow below, one step per tick; talks to the hardware only through the `BrightnessSource` and `MonitorLink` protocols, so it is unit-tested with fakes. |
+| `BuiltInDisplay` | system | Find the built-in display (`CGDisplayIsBuiltin`); return its brightness 0…1, or `nil` when offline (lid closed), asleep (`CGDisplayIsAsleep`) or unreadable. |
 | `ExternalDDCDisplay` | system | Discover the external `DCPAVServiceProxy`, own the `IOAVService` handle, send packets built by `DDC`, report failures. |
-| `main.swift` | glue | Parse flags, run the loop, log. |
+| `BrightnessSync.swift` | glue | Entry point (`@main`): parse flags, build the adapters, call `Syncer.tick` every 250 ms, log. |
 
 Pure units import only Foundation and are fully unit-tested. System units are thin wrappers verified
 on the real hardware.
@@ -71,19 +73,24 @@ Every 250 ms on the main thread:
 
 1. Snapshot the online display IDs. If the set changed since the previous tick, drop the DDC handle
    and set *force*.
-2. Read the built-in brightness. If `nil` (offline or asleep), skip the tick; on the first tick it is
-   available again, set *force*.
-3. `target = BrightnessMapper.map(brightness)`.
+2. Read the built-in brightness. If `nil` (offline, asleep or unreadable), skip the tick; on the first
+   tick it is available again, set *force*.
+3. `level = BrightnessMapper.level(brightness)`; the value written is `target = round(level)`.
 4. If `SyncPolicy` says write, make sure a DDC handle exists (discovering it per *Error handling*;
-   if none is found, skip the tick), then send the set-brightness packet (twice, 10 ms apart).
+   if none is found, skip the tick), then send the set-brightness packet twice, 10 ms apart. The
+   write counts as delivered if either send is accepted.
    - Success: `lastWritten = target`, `lastWriteTime = now`, clear *force*.
-   - Failure: drop the handle; leave `lastWritten` unchanged so the value is retried.
+   - Failure: drop the handle and set *force*, because the value may have reached the panel anyway;
+     leave `lastWritten` unchanged so the value is retried.
 
 ### SyncPolicy rules
 
-- Write when *force* is set or `target != lastWritten`,
+- Write when *force* is set or `level` is at least 0.75 of a step away from `lastWritten` — a 0.25
+  dead band past the rounding midpoint, so a level hovering at x.5 doesn't flip the monitor back and
+  forth,
 - but never sooner than 400 ms after the previous write. The loop keeps running, so the latest
-  target is delivered as soon as the window opens.
+  target is delivered as soon as the window opens. A negative interval (the clock stepped back)
+  counts as expired, here and for the 5 s rediscovery backoff.
 - The first tick after start-up is a forced write.
 
 Effect: a brightness-key press or an auto-brightness ramp produces a handful of whole-number writes
@@ -93,23 +100,27 @@ and no smooth fades, keeping DDC traffic to the monitor's controller and setting
 
 - **No DDC handle:** rediscover right after a display change, otherwise at most every 5 s.
 - **More than one external `DCPAVServiceProxy`:** use the first and log a warning (single-monitor scope).
-- **Missing private symbol at start-up:** log which one and exit non-zero. launchd throttles the
-  restarts; the log explains why.
+- **Missing private symbol at start-up:** log which one and exit non-zero. launchd restarts the agent
+  at most once a minute (`ThrottleInterval` 60); the log explains why.
 - **Crash:** launchd `KeepAlive` restarts the agent.
+- **Logging:** a log write that fails (for example, a full disk) is dropped instead of crashing.
 
 ## Interface and operations
 
 - **CLI:** `brightness-sync [--min N] [--max N] [--verbose]`, with `0 ≤ min < max ≤ 100`. Invalid
   flags print usage and exit with status 64.
 - **Logs:** stderr, redirected by launchd to `~/Library/Logs/brightness-sync.log`. Always log the
-  start-up configuration, discovery results and errors; `--verbose` also logs every write.
+  start-up configuration, discovery results and errors; a status message identical to the previous
+  one on the same topic is dropped, except that a reconnection after a display change is always
+  logged. `--verbose` also logs every write.
 - **Makefile:**
   - `make test` — `swift test`.
-  - `make install [MIN=… MAX=…]` — release build, copy the binary to `~/.local/bin/brightness-sync`,
-    render `~/Library/LaunchAgents/io.github.effekt3r.brightness-sync.plist` (absolute paths,
-    `RunAtLoad`, `KeepAlive`), and (re)load it with `launchctl bootstrap gui/$UID`.
+  - `make install [MIN=… MAX=…]` — release build; validate `MIN`/`MAX` with the new binary before the
+    running agent is touched; copy the binary to `~/.local/bin/brightness-sync`; render
+    `~/Library/LaunchAgents/io.github.effekt3r.brightness-sync.plist` (absolute paths, `RunAtLoad`,
+    `KeepAlive`, `ThrottleInterval` 60); (re)load it with `launchctl bootstrap gui/$UID`.
   - `make uninstall` — `launchctl bootout`, then remove the binary and the plist.
-  - `make logs` — `tail -f` the log.
+  - `make logs` — `tail -F` the log.
 
 ## Testing
 
@@ -117,10 +128,17 @@ and no smooth fades, keeping DDC traffic to the monitor's controller and setting
 - `DDC`: set packets for 50 and 100 equal the verified bytes; the get request equals `82 01 10 AC`;
   the captured reply decodes to current 100 / max 100; replies with a bad checksum, wrong opcode,
   non-zero result code or wrong VCP code are rejected; values above 255 use the high byte.
-- `BrightnessMapper`: endpoints, rounding, custom min/max, out-of-range input clamped.
+- `BrightnessMapper`: endpoints, rounding, unrounded level, custom min/max, out-of-range input clamped.
 - `SyncPolicy`: first tick writes; unchanged target does not write; a change inside the 400 ms window
-  waits, then writes the latest target; *force* writes an unchanged target; a failed write does not
-  advance `lastWritten`.
+  waits, then writes the latest target; *force* writes an unchanged target; a level hovering at a
+  rounding boundary is not rewritten; a clock that steps back does not block writes; a failed write
+  does not advance `lastWritten`.
+- `Syncer` (fake source and monitor): first write; no rewrite when unchanged; rate limit; no chatter
+  at a rounding boundary; replug; built-in display returning; failed-write retry, including the forced
+  resend when the target returns to the last written value; clock stepping back; missing-monitor
+  backoff; log messages.
+- `Options` (including that `--help` still validates the range, which `make install` relies on) and
+  `PrivateSymbol` lookups.
 
 **Live checklist (this Mac and monitor):**
 1. Brightness keys up and down: the Samsung follows within about 0.5 s.
