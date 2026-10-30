@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         .target(name: "BrightnessSyncCore"),
+        .executableTarget(name: "brightness-sync", dependencies: ["BrightnessSyncCore"]),
         .testTarget(name: "BrightnessSyncCoreTests", dependencies: ["BrightnessSyncCore"]),
     ]
 )
