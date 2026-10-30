@@ -38,6 +38,11 @@ over DDC/CI.
    It is not used. That slider should stay at max.
 5. `DisplayServicesAmbientLightCompensationEnabled` does not have the signature `(displayID) -> Bool`
    and crashes when called that way. Do not call it.
+6. **Something resets the Samsung after a wake.** In three sleep/wake tests (2026-10-31) the monitor
+   kept answering DDC with the agent's last value through sleep, then jumped to 100 about 3–5 s after
+   the displays woke — after the agent's resend. Whether the monitor or macOS does this is unknown.
+   `CGDisplayIsAsleep` and `DisplayServicesGetBrightness` both update live in the agent, which runs no
+   run loop.
 
 ## Approach
 
@@ -82,6 +87,14 @@ Every 250 ms on the main thread:
    - Success: `lastWritten = target`, `lastWriteTime = now`, clear *force*.
    - Failure: drop the handle and set *force*, because the value may have reached the panel anyway;
      leave `lastWritten` unchanged so the value is retried.
+
+### Re-checking after events
+
+After start-up, a display change, or the built-in display coming back (wake, lid opened), the agent
+re-reads the monitor's brightness 2, 4, 6, 8, 10, 15, 20 and 30 s later. If it is more than 1 away from
+`lastWritten`, it logs the drift and sets *force*, so the value is resent on the same tick. Checks are
+scheduled only by those events, never by a correction, so a monitor that always reads back differently
+costs at most eight extra writes per event. This exists because of verified fact 6.
 
 ### SyncPolicy rules
 
@@ -136,7 +149,7 @@ and no smooth fades, keeping DDC traffic to the monitor's controller and setting
 - `Syncer` (fake source and monitor): first write; no rewrite when unchanged; rate limit; no chatter
   at a rounding boundary; replug; built-in display returning; failed-write retry, including the forced
   resend when the target returns to the last written value; clock stepping back; missing-monitor
-  backoff; log messages.
+  backoff; drift after a wake corrected; corrections bounded per event; log messages.
 - `Options` (including that `--help` still validates the range, which `make install` relies on) and
   `PrivateSymbol` lookups.
 
@@ -147,6 +160,15 @@ and no smooth fades, keeping DDC traffic to the monitor's controller and setting
 4. Lid closed (clamshell): the agent idles without errors.
 5. No double dimming from macOS's own Samsung slider. During probing, macOS's stored value for the
    Samsung moved once after a raw DDC write; confirm this is harmless.
+
+**Live results (2026-10-31, installed agent):**
+- Item 1 — passed. Built-in brightness set through DisplayServices (the value the keys and
+  auto-brightness move): 0.2 → Samsung 20, 0.12 → 12, back to 0.0656 → 7, each within 1.5 s.
+- Item 3, display sleep and wake — passed after the fix in *Re-checking after events*: sleep is detected
+  at once; the reset to 100 after waking was corrected about 1 s later.
+- Not yet run, because they need someone at the Mac: item 2 (auto-brightness), the power-cycle and
+  unplug parts of item 3, item 4 (lid closed), and item 5 (visual check; macOS's own Samsung value
+  currently reads 0.2866 while its gamma table is unchanged).
 
 ## Non-goals
 
