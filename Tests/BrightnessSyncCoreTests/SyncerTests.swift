@@ -76,9 +76,38 @@ struct SyncerTests {
         #expect(monitor.writes == [50, 70])
     }
 
+    @Test func brightnessResetAfterWakeIsCorrected() {
+        let source = FakeSource(0.06)
+        let monitor = FakeMonitor()
+        let log = LogRecorder()
+        let syncer = makeSyncer(source, monitor, log)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)       // writes 6
+        monitor.reading = DDC.Reply(current: 6, maximum: 100)
+        source.value = nil
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 10)  // displays asleep
+        source.value = 0.06
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 20)  // awake: forced resend of 6
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 22)  // check: still 6
+        monitor.reading = DDC.Reply(current: 100, maximum: 100)     // reset by the monitor or macOS
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 25)  // check: 100, so resend
+        #expect(monitor.writes == [6, 6, 6])
+        #expect(log.lines.contains("external display drifted to 100 (expected 6); resending"))
+    }
+
+    @Test func driftCorrectionIsBoundedPerEvent() {
+        let monitor = FakeMonitor()  // always reads back 100
+        let syncer = makeSyncer(FakeSource(0.06), monitor)
+        for halfSecond in 0...240 {
+            syncer.tick(onlineDisplays: bothDisplays, now: start + Double(halfSecond) / 2)
+        }
+        // The first write, then at most one correction per scheduled check.
+        #expect(monitor.writes.count == 1 + Syncer.verificationDelays.count)
+    }
+
     @Test func brightnessHoveringAtARoundingBoundaryDoesNotChatter() {
         let source = FakeSource(0.5)
         let monitor = FakeMonitor()
+        monitor.reading = DDC.Reply(current: 50, maximum: 100)
         let syncer = makeSyncer(source, monitor)
         syncer.tick(onlineDisplays: bothDisplays, now: start)  // writes 50
         for (index, value) in [0.506, 0.494, 0.506, 0.494].enumerated() {

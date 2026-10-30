@@ -23,6 +23,10 @@ public protocol MonitorLink: AnyObject {
 public final class Syncer {
     public static let tickInterval: TimeInterval = 0.25
     public static let rediscoveryInterval: TimeInterval = 5
+    /// After start-up, a display change or the built-in display coming back, the monitor's brightness is
+    /// re-read this many seconds later and resent if something else changed it. (About 5 s after the
+    /// displays wake, the LS24A600U's brightness gets reset to 100, by the monitor or by macOS.)
+    public static let verificationDelays: [TimeInterval] = [2, 4, 6, 8, 10, 15, 20, 30]
 
     private let source: any BrightnessSource
     private let monitor: any MonitorLink
@@ -34,6 +38,7 @@ public final class Syncer {
     private var displays: Set<UInt32>?
     private var sourceAvailable = true
     private var lastDiscovery: Date?
+    private var verifications: [Date] = []
     private var lastNotes: [String: String] = [:]
 
     public init(source: any BrightnessSource, monitor: any MonitorLink, mapper: BrightnessMapper,
@@ -52,6 +57,7 @@ public final class Syncer {
             monitor.disconnect()
             lastDiscovery = nil
             policy.forceResend()
+            scheduleVerifications(from: now)
             for topic in ["monitor", "monitor-count", "write"] { lastNotes[topic] = nil }  // log the reconnection
         }
 
@@ -63,9 +69,11 @@ public final class Syncer {
         if !sourceAvailable {
             sourceAvailable = true
             policy.forceResend()
+            scheduleVerifications(from: now)
         }
         note("built-in", "built-in display available")
 
+        verifyIfDue(now: now)
         guard policy.shouldWrite(mapper.level(brightness), at: now), connectIfNeeded(now: now) else { return }
 
         let target = mapper.map(brightness)
@@ -96,6 +104,24 @@ public final class Syncer {
         let reading = monitor.readBrightness().map { "brightness \($0.current)/\($0.maximum)" } ?? "brightness read failed"
         note("monitor", "external display connected (\(reading))")
         return true
+    }
+
+    private func scheduleVerifications(from now: Date) {
+        verifications = Self.verificationDelays.map { now + $0 }
+    }
+
+    /// Re-reads the monitor when a scheduled check is due and forces a resend if its brightness is more
+    /// than one step away from the last value written. Checks are only scheduled by events, never by a
+    /// correction, so a monitor that reads back differently costs at most one write per check.
+    private func verifyIfDue(now: Date) {
+        guard let due = verifications.first, due <= now else { return }
+        verifications.removeAll { $0 <= now }
+        guard monitor.isConnected, let expected = policy.lastWritten, let reading = monitor.readBrightness()
+        else { return }
+        if abs(Int(reading.current) - expected) > 1 {
+            log("external display drifted to \(reading.current) (expected \(expected)); resending")
+            policy.forceResend()
+        }
     }
 
     /// Logs `message` unless it repeats the previous message on the same topic.
