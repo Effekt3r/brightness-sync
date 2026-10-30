@@ -132,6 +132,15 @@ struct SyncerTests {
         #expect(monitor.writes == [50, 60, 50])
     }
 
+    @Test func clockSteppingBackDoesNotStallRediscovery() {
+        let monitor = FakeMonitor()
+        monitor.displaysFound = 0
+        let syncer = makeSyncer(FakeSource(0.5), monitor)
+        syncer.tick(onlineDisplays: builtInOnly, now: start + 3600)  // discovery #1
+        syncer.tick(onlineDisplays: builtInOnly, now: start)         // clock stepped back an hour
+        #expect(monitor.connectCount == 2)
+    }
+
     @Test func missingMonitorIsRetriedEveryFiveSecondsAndLoggedOnce() {
         let monitor = FakeMonitor()
         monitor.displaysFound = 0

@@ -21,8 +21,8 @@ public struct SyncPolicy: Sendable {
     }
 
     public func shouldWrite(_ target: Int, at now: Date) -> Bool {
-        if let lastWriteTime, now.timeIntervalSince(lastWriteTime) < minimumInterval {
-            return false
+        if let lastWriteTime, (0..<minimumInterval).contains(now.timeIntervalSince(lastWriteTime)) {
+            return false  // a negative interval means the clock stepped back; don't wait for it to catch up
         }
         return forced || target != lastWritten
     }

@@ -43,6 +43,12 @@ struct SyncPolicyTests {
         #expect(!policy.shouldWrite(50, at: start + 1))
     }
 
+    @Test func clockSteppingBackDoesNotBlockWrites() {
+        var policy = SyncPolicy()
+        policy.didWrite(50, at: start + 3600)
+        #expect(policy.shouldWrite(60, at: start))
+    }
+
     @Test func failedWriteKeepsAskingForTheValue() {
         var policy = SyncPolicy()
         policy.didWrite(50, at: start)

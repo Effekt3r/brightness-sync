@@ -81,7 +81,9 @@ public final class Syncer {
 
     private func connectIfNeeded(now: Date) -> Bool {
         if monitor.isConnected { return true }
-        if let lastDiscovery, now.timeIntervalSince(lastDiscovery) < Self.rediscoveryInterval { return false }
+        if let lastDiscovery, (0..<Self.rediscoveryInterval).contains(now.timeIntervalSince(lastDiscovery)) {
+            return false  // as in SyncPolicy, a clock that stepped back doesn't hold rediscovery up
+        }
         lastDiscovery = now
 
         let found = monitor.connect()
