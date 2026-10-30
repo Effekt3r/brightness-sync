@@ -46,15 +46,17 @@ public final class ExternalDDCDisplay: MonitorLink {
         service = nil
     }
 
-    /// Writes VCP 0x10. Each packet goes out twice, 10 ms apart, as verified on the LS24A600U.
+    /// Writes VCP 0x10. Each packet goes out twice, 10 ms apart, as verified on the LS24A600U;
+    /// the write counts as delivered if either attempt was accepted.
     public func setBrightness(_ value: Int) -> Bool {
         guard let service else { return false }
         let packet = DDC.setPacket(code: DDC.brightness, value: UInt16(clamping: value))
+        var delivered = false
         for _ in 0..<2 {
             usleep(10_000)
-            guard write(packet, to: service) else { return false }
+            delivered = write(packet, to: service) || delivered
         }
-        return true
+        return delivered
     }
 
     public func readBrightness() -> DDC.Reply? {

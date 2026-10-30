@@ -75,6 +75,7 @@ public final class Syncer {
         } else {
             note("write", "DDC write failed; reconnecting")
             monitor.disconnect()
+            policy.forceResend()  // the failed value may have reached the panel anyway
         }
     }
 

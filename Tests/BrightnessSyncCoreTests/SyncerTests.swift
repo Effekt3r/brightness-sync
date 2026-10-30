@@ -118,6 +118,20 @@ struct SyncerTests {
         #expect(log.lines.filter { $0 == "DDC write failed; reconnecting" }.count == 1)
     }
 
+    @Test func valueIsResentAfterAFailedWriteEvenIfTheTargetReturnsToTheLastWrittenValue() {
+        let source = FakeSource(0.5)
+        let monitor = FakeMonitor()
+        let syncer = makeSyncer(source, monitor)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)      // writes 50
+        source.value = 0.6
+        monitor.acceptsWrites = false
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 1)  // 60 reported as failed, may be on the panel
+        source.value = 0.5
+        monitor.acceptsWrites = true
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 7)  // after rediscovery, 50 must go out again
+        #expect(monitor.writes == [50, 60, 50])
+    }
+
     @Test func missingMonitorIsRetriedEveryFiveSecondsAndLoggedOnce() {
         let monitor = FakeMonitor()
         monitor.displaysFound = 0
