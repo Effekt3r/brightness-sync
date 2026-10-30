@@ -34,13 +34,16 @@ struct BrightnessSync {
             verbose: options.verbose,
             log: log)
         while true {
-            syncer.tick(onlineDisplays: Set(Displays.online()), now: .now)
+            autoreleasepool {
+                syncer.tick(onlineDisplays: Set(Displays.online()), now: .now)
+            }
             Thread.sleep(forTimeInterval: Syncer.tickInterval)
         }
     }
 
     static func log(_ message: String) {
         let timestamp = Date.now.formatted(Date.ISO8601FormatStyle(timeZone: .current))
-        FileHandle.standardError.write(Data("\(timestamp) \(message)\n".utf8))
+        // The throwing variant: the legacy write(_:) raises an exception (and crashes) when the disk is full.
+        try? FileHandle.standardError.write(contentsOf: Data("\(timestamp) \(message)\n".utf8))
     }
 }

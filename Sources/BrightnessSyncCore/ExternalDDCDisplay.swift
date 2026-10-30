@@ -61,6 +61,7 @@ public final class ExternalDDCDisplay: MonitorLink {
 
     public func readBrightness() -> DDC.Reply? {
         guard let service else { return nil }
+        defer { usleep(50_000) }  // DDC/CI: give the monitor 50 ms before the next command
         let request = DDC.getPacket(code: DDC.brightness)
         for _ in 0..<3 {
             for _ in 0..<2 {
