@@ -37,4 +37,23 @@ struct BrightnessMapperTests {
         #expect(mapper.map(1.7) == 90)
         #expect(mapper.map(.nan) == 10)
     }
+
+    @Test func pictureIsDimmedInProportionBelowTheThreshold() {
+        let mapper = BrightnessMapper(dimBelow: 0.2)
+        #expect(mapper.pictureLevel(0.5) == 1)
+        #expect(mapper.pictureLevel(0.2) == 1)
+        #expect(mapper.pictureLevel(0.1) == 0.5)
+        #expect(mapper.pictureLevel(0.05) == 0.25)
+    }
+
+    @Test func pictureNeverGoesBlack() {
+        let mapper = BrightnessMapper(dimBelow: 0.2)
+        #expect(mapper.pictureLevel(0) == BrightnessMapper.minimumPicture)
+        #expect(mapper.pictureLevel(-1) == BrightnessMapper.minimumPicture)
+        #expect(mapper.pictureLevel(.nan) == 1)
+    }
+
+    @Test func zeroThresholdTurnsPictureDimmingOff() {
+        #expect(BrightnessMapper(dimBelow: 0).pictureLevel(0) == 1)
+    }
 }

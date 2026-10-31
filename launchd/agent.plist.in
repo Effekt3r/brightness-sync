@@ -11,6 +11,8 @@
 		<string>@MIN@</string>
 		<string>--max</string>
 		<string>@MAX@</string>
+		<string>--dim-below</string>
+		<string>@DIM_BELOW@</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

@@ -6,14 +6,16 @@ struct OptionsTests {
         let options = try Options(arguments: [])
         #expect(options.minimum == 0)
         #expect(options.maximum == 100)
+        #expect(options.dimBelow == 0.15)
         #expect(!options.verbose)
         #expect(!options.showHelp)
     }
 
     @Test func parsesEveryFlag() throws {
-        let options = try Options(arguments: ["--min", "10", "--max", "90", "--verbose"])
+        let options = try Options(arguments: ["--min", "10", "--max", "90", "--dim-below", "0.2", "--verbose"])
         #expect(options.minimum == 10)
         #expect(options.maximum == 90)
+        #expect(options.dimBelow == 0.2)
         #expect(options.verbose)
     }
 
@@ -34,6 +36,9 @@ struct OptionsTests {
         ["--max", "101"],
         ["--min", "50", "--max", "50"],
         ["--brightness", "5"],
+        ["--dim-below", "1"],
+        ["--dim-below", "-0.1"],
+        ["--dim-below", "half"],
     ])
     func rejectsInvalidArguments(arguments: [String]) {
         #expect(throws: OptionsError.self) { try Options(arguments: arguments) }

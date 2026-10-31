@@ -26,11 +26,12 @@ struct BrightnessSync {
             exit(1)
         }
 
-        log("started (min \(options.minimum), max \(options.maximum)\(options.verbose ? ", verbose" : ""))")
+        log("started (min \(options.minimum), max \(options.maximum), dim below \(options.dimBelow)\(options.verbose ? ", verbose" : ""))")
         let syncer = Syncer(
             source: builtIn,
             monitor: monitor,
-            mapper: BrightnessMapper(minimum: options.minimum, maximum: options.maximum),
+            dimmer: ExternalGamma(),
+            mapper: BrightnessMapper(minimum: options.minimum, maximum: options.maximum, dimBelow: options.dimBelow),
             verbose: options.verbose,
             log: log)
         while true {

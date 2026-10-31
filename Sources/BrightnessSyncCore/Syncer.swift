@@ -18,6 +18,12 @@ public protocol MonitorLink: AnyObject {
     func readBrightness() -> DDC.Reply?
 }
 
+/// Dims the external monitor's picture in software, for levels below its backlight's minimum.
+public protocol PictureDimmer: AnyObject {
+    /// Shows `level` (0…1) of the normal picture; 1 restores it. Returns false if that failed.
+    func setPictureLevel(_ level: Double) -> Bool
+}
+
 /// The sync loop's logic, one step per `tick`: follow the built-in brightness, write it to the monitor
 /// when `SyncPolicy` allows, and recover from display changes and failed writes.
 public final class Syncer {
@@ -27,9 +33,13 @@ public final class Syncer {
     /// re-read this many seconds later and resent if something else changed it. (About 5 s after the
     /// displays wake, the LS24A600U's brightness gets reset to 100, by the monitor or by macOS.)
     public static let verificationDelays: [TimeInterval] = [2, 4, 6, 8, 10, 15, 20, 30]
+    /// While the picture is dimmed, the dimming is re-applied this often, because macOS resets gamma
+    /// tables on events such as wake and colour-profile changes.
+    public static let pictureRefreshInterval: TimeInterval = 2
 
     private let source: any BrightnessSource
     private let monitor: any MonitorLink
+    private let dimmer: any PictureDimmer
     private let mapper: BrightnessMapper
     private let verbose: Bool
     private let log: (String) -> Void
@@ -39,12 +49,15 @@ public final class Syncer {
     private var sourceAvailable = true
     private var lastDiscovery: Date?
     private var verifications: [Date] = []
+    private var appliedPicture = 1.0
+    private var lastPictureApply: Date?
     private var lastNotes: [String: String] = [:]
 
-    public init(source: any BrightnessSource, monitor: any MonitorLink, mapper: BrightnessMapper,
-                verbose: Bool = false, log: @escaping (String) -> Void) {
+    public init(source: any BrightnessSource, monitor: any MonitorLink, dimmer: any PictureDimmer,
+                mapper: BrightnessMapper, verbose: Bool = false, log: @escaping (String) -> Void) {
         self.source = source
         self.monitor = monitor
+        self.dimmer = dimmer
         self.mapper = mapper
         self.verbose = verbose
         self.log = log
@@ -58,12 +71,14 @@ public final class Syncer {
             lastDiscovery = nil
             policy.forceResend()
             scheduleVerifications(from: now)
+            lastPictureApply = nil  // re-apply any dimming to the (possibly new) external display
             for topic in ["monitor", "monitor-count", "write"] { lastNotes[topic] = nil }  // log the reconnection
         }
 
         guard let brightness = source.brightness() else {
             note("built-in", "built-in display unavailable (lid closed, asleep, or brightness unreadable); waiting")
             sourceAvailable = false
+            restorePicture()  // with the lid closed nothing would ever undim it
             return
         }
         if !sourceAvailable {
@@ -73,6 +88,7 @@ public final class Syncer {
         }
         note("built-in", "built-in display available")
 
+        updatePicture(mapper.pictureLevel(brightness), now: now)
         verifyIfDue(now: now)
         guard policy.shouldWrite(mapper.level(brightness), at: now), connectIfNeeded(now: now) else { return }
 
@@ -104,6 +120,32 @@ public final class Syncer {
         let reading = monitor.readBrightness().map { "brightness \($0.current)/\($0.maximum)" } ?? "brightness read failed"
         note("monitor", "external display connected (\(reading))")
         return true
+    }
+
+    /// Applies the picture level when it changes, and re-applies a dimmed level every
+    /// `pictureRefreshInterval` in case macOS reset the gamma table.
+    private func updatePicture(_ level: Double, now: Date) {
+        let changed = abs(level - appliedPicture) >= 0.005
+        let refreshDue = level < 1
+            && !(lastPictureApply.map { (0..<Self.pictureRefreshInterval).contains(now.timeIntervalSince($0)) } ?? false)
+        guard changed || refreshDue else { return }
+        guard dimmer.setPictureLevel(level) else {
+            note("picture", "dimming the external display's picture failed")
+            return
+        }
+        if (level < 1) != (appliedPicture < 1) {
+            note("picture", level < 1 ? "dimming the external display's picture below its backlight minimum"
+                                      : "external display's picture back to full")
+        }
+        if verbose, changed { log("picture \(String(format: "%.2f", level))") }
+        appliedPicture = level
+        lastPictureApply = now
+    }
+
+    private func restorePicture() {
+        guard appliedPicture < 1, dimmer.setPictureLevel(1) else { return }
+        appliedPicture = 1
+        note("picture", "external display's picture back to full")
     }
 
     private func scheduleVerifications(from now: Date) {

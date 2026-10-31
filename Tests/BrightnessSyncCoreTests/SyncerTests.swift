@@ -32,6 +32,14 @@ final class FakeMonitor: MonitorLink {
     func readBrightness() -> DDC.Reply? { reading }
 }
 
+final class FakeDimmer: PictureDimmer {
+    private(set) var levels: [Double] = []
+    func setPictureLevel(_ level: Double) -> Bool {
+        levels.append(level)
+        return true
+    }
+}
+
 final class LogRecorder {
     private(set) var lines: [String] = []
     func record(_ line: String) { lines.append(line) }
@@ -42,8 +50,45 @@ struct SyncerTests {
     let bothDisplays: Set<UInt32> = [1, 4]
     let builtInOnly: Set<UInt32> = [1]
 
-    func makeSyncer(_ source: FakeSource, _ monitor: FakeMonitor, _ log: LogRecorder = LogRecorder()) -> Syncer {
-        Syncer(source: source, monitor: monitor, mapper: BrightnessMapper(), log: log.record)
+    func makeSyncer(_ source: FakeSource, _ monitor: FakeMonitor, _ log: LogRecorder = LogRecorder(),
+                    dimmer: FakeDimmer = FakeDimmer()) -> Syncer {
+        Syncer(source: source, monitor: monitor, dimmer: dimmer, mapper: BrightnessMapper(dimBelow: 0.2), log: log.record)
+    }
+
+    @Test func picturesAboveTheThresholdAreLeftAlone() {
+        let dimmer = FakeDimmer()
+        let syncer = makeSyncer(FakeSource(0.5), FakeMonitor(), dimmer: dimmer)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        #expect(dimmer.levels.isEmpty)
+    }
+
+    @Test func pictureIsDimmedBelowTheThresholdAndRestoredAboveIt() {
+        let source = FakeSource(0.1)
+        let dimmer = FakeDimmer()
+        let syncer = makeSyncer(source, FakeMonitor(), dimmer: dimmer)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        source.value = 0.5
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 0.25)
+        #expect(dimmer.levels == [0.5, 1])
+    }
+
+    @Test func dimmingIsReappliedPeriodicallyInCaseMacOSResetsIt() {
+        let dimmer = FakeDimmer()
+        let syncer = makeSyncer(FakeSource(0.1), FakeMonitor(), dimmer: dimmer)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        syncer.tick(onlineDisplays: bothDisplays, now: start + 1)
+        syncer.tick(onlineDisplays: bothDisplays, now: start + Syncer.pictureRefreshInterval)
+        #expect(dimmer.levels == [0.5, 0.5])
+    }
+
+    @Test func pictureIsRestoredWhileTheBuiltInDisplayIsUnavailable() {
+        let source = FakeSource(0.1)
+        let dimmer = FakeDimmer()
+        let syncer = makeSyncer(source, FakeMonitor(), dimmer: dimmer)
+        syncer.tick(onlineDisplays: bothDisplays, now: start)
+        source.value = nil  // lid closed: the monitor's picture must not stay dimmed
+        syncer.tick(onlineDisplays: [4], now: start + 1)
+        #expect(dimmer.levels == [0.5, 1])
     }
 
     @Test func firstTickConnectsAndWritesTheMappedValue() {
